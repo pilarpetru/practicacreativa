@@ -6,6 +6,6 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('auto-p2')
-
+Hola amigos
 
 
