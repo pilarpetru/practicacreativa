@@ -36,30 +36,37 @@ def prepare(num_serv = 3):
                 call(["qemu-image", "create", "-f", "qcow2", "-b", "cdps-vm-base-pc1.qcow2" "s{}.qcow2".format(i)] )
                 call(["cp", "plantilla-vm-pc1.xml", "s{}.xml".format(i)])
                 creacionFicherosXML("s{}".format(i), lan2 )
+                configuraciones("s{}".format(i))
                 call(["sudo", "virsh", "define", "s{}.xml".format(i)])
             
             #creacion C1
             call(["qemu-image", "create", "-f", "qcow2", "-b", "cdps-vm-base-pc1.qcow2" "c1.qcow2"] )
             call(["cp", "plantilla-vm-pc1.xml", "c1.xml"])
             creacionFicherosXML("c1", lan1)
+            configuraciones("c1")
             call(["sudo", "virsh", "define", "c1.xml"])
             #creacion LB
             call(["qemu-image", "create", "-f", "qcow2", "-b", "cdps-vm-base-pc1.qcow2" "lb.qcow2"] )
             call(["cp", "plantilla-vm-pc1.xml", "lb.xml"])
             creacionFicherosXML("lb", lan1)
+            configuraciones("lb")
             call(["sudo", "virsh", "define", "lb.xml"])
             #creacionBridges
             createBridges()
             call(["HOME=/mnt/tmp", "sudo", "virt-manager"])
-            
+            #configuramos el Host
+            call(["sudo", "ifconfig", "LAN1", "10.0.1.3/24"])
+            call(["sudo", "ip", "route", "add", "10.0.0.0/16", "via", "10.0.1.1"])
 
     except:
         logger.debug('Debe introducir un numero entero')
         sys.exit()
 
-    
+#----------------------------------------------LAUNCH----------------------------------------------------------
+#def launch():
+
       
-    
+#---------------------------------------FUNCIONES AUXILIARES---------------------------------------------------
 def creacionFicherosXML(nombre, lan):
     fichero = '{}.xml'.format(nombre)
     #cargamos ficheros XML que dice el enunciado
@@ -95,5 +102,76 @@ def createBridges():
     call(["sudo", "ifconfig", lan2, "up"])    
 
 
-logger.debug('mensaje debug1')
-logger.debug('mensaje debug2')
+def configuraciones(name):
+    #configuramos el archivo /etc/hostname
+    f = open("./mnt/tmp/hostname", "w")
+    f.write(name)
+    f.close()
+    call(["sudo", "virt-copy-in", "-a", "{}.qcow2".format(name), "hostname", "/etc"])
+
+    #configuramos archivo /etc/hosts
+    
+    call("sudo", "virt-copy-out", "-a", "{}.qcow2", "/etc/hosts", "./mnt/tmp")
+    hin = open("/mnt/tmp/hosts", "r")
+    hout = open("/mnt/tmp/hosts_mod", "w")
+    for line in hin:
+        if "127.0.1.1" in line:
+            hout.write("127.0.1.1 {} \n".format(name))
+        else:
+            hout.write(line)
+    for line in hout:
+        hin.write(line)
+    hin.close
+    hout.close
+    call(["sudo", "virt-copy-in", "-a", "{}.qcow2".format(name), "hosts", "/etc"])
+    #configuramos el archivo /etc/network/interfaces
+    if name == lb:
+        i = """auto lo
+        iface lo inet loopback
+        
+        auto eth0
+        iface eth0 inet static
+            address 10.0.1.1
+            netmask 255.255.255.0
+                
+        auto eth1
+        iface eth1 inet static
+            address 10.0.2.1
+            netmask 255.255.255.0 """
+    elif name==c1:
+        i = """
+            auto lo
+        iface lo inet loopback
+
+        auto eth0
+        iface eth0 inet static
+            address 10.0.1.2
+            netmask 255.255.255.0
+            gateway 10.0.1.1
+        """
+    else:
+        i="""auto lo
+        iface lo inet loopback
+
+        auto eth0
+        iface eth0 inet static
+            address 10.0.2.1{}
+            netmask 255.255.255.0
+            gateway 10.0.2.1
+        """.format(name[1])
+    k = open("./mnt/tmp/interfaces", "w")
+    k.write(i)
+    k.close()
+    call(["sudo", "virt-copy-in", "-a", "{}.qcow2".format(name), "interfaces", "/etc/network"])
+    #configuramos lb como router
+    if name == "lb":
+        os.system("sudo virt-edit -a lb.qcow2 /etc/sysctl.conf \-e 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/'")
+    #modificamos las paginas web iniciales
+    if name[0]=="s":
+        t = open("./mnt/tmp/index.html", "w")
+        t.write("S{}".format(name[1]))
+        t.close()
+        call(["sudo", "virt-copy-in", "-a", "{}.qcow2".format(name), "index.html", "/var/www/html/index.html"])
+
+#logger.debug('mensaje debug1')
+#logger.debug('mensaje debug2')
